@@ -581,8 +581,36 @@
     return false;
   }
 
+  /**
+   * 新版顶栏灰标容器：如 <div class="wbpro-tag wbpro-tag-c2"><div>荐读</div></div>
+   * 外层可能被 flex 拉宽，不走 isPromoMetaLabelElement 的宽度上限逻辑。
+   */
+  function isPromoWbproTagInHeader(card) {
+    const cRect = card.getBoundingClientRect();
+    if (cRect.height < 1) {
+      return false;
+    }
+    for (const tag of card.querySelectorAll('.wbpro-tag')) {
+      if (!textMatchesPromoLabel(tag.textContent)) {
+        continue;
+      }
+      const eRect = tag.getBoundingClientRect();
+      if (eRect.top - cRect.top > PROMO_MAX_TOP_OFFSET) {
+        continue;
+      }
+      if (eRect.top < cRect.top - 2) {
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
   function isPromoTaggedInMetaLine(card) {
     if (isPromoAdLabelImageInHeader(card)) {
+      return true;
+    }
+    if (isPromoWbproTagInHeader(card)) {
       return true;
     }
     const all = card.querySelectorAll(
@@ -602,7 +630,8 @@
     }
     const done = new Set();
     const roots = document.querySelectorAll(
-      'main article, [role=main] article, #plc_frame article, #plc_main article, ' +
+      '#app article, article[class*="woo-panel"], ' +
+        'main article, [role=main] article, #plc_frame article, #plc_main article, ' +
         'div[action-type="feed_list_item"], ' +
         '#v6_pl_content article, [id*="_v6_"] article, ' +
         'div[action-type="feed"], div.card',
