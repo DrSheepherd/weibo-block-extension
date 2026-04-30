@@ -6,6 +6,7 @@
   /** 日期行前的灰标：整卡隐藏，不进入列表展示 */
   const PROMO_TAG_WORDS = ['推荐', '荐读', '广告'];
   const DATA_PROMO_BLOCKED = 'data-weibo-lajie-promo-blocked';
+  const SEL_PROMO_BLOCKED = '[' + DATA_PROMO_BLOCKED + '="1"]';
   /** 相对卡片顶部的最大竖直距离，避免误伤正文里偶然只有两字的块 */
   const PROMO_MAX_TOP_OFFSET = 200;
   /** 灰标「广告」为图片时，prd 下该资源，见 d.sinaimg.cn/prd/1005/891/.../icon_auth_white.png */
@@ -80,6 +81,43 @@
     }
     /** 热门 tab：含 /hot、/hot/weibo/… 等（新版 SPA 路径多样） */
     if (/^\/hot(\/|$)/i.test(p)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 灰标隐藏：范围大于「拉黑按钮」页。超话 /p/…、个人 /u/… 等也有 vue-recycle-scroller + wbpro-tag，
+   * 原 isTargetPage 不含这些路径会导致 hidePromoFeedItems 整段不执行。
+   */
+  function shouldRunPromoWbproHide() {
+    if (isWeiboSearchResultPage()) {
+      return true;
+    }
+    if (!isWwwApexWeibo()) {
+      return false;
+    }
+    const p = normalizePath();
+    if (p.indexOf('/setting') === 0 || /^\/(login|signup)\b/i.test(p)) {
+      return false;
+    }
+    /** 分组详情 /mygroups?gid= 不注入拉黑按钮，但流里同样有 wbpro 荐读卡，需跑灰标隐藏 */
+    if (p === '/mygroups') {
+      try {
+        if (new URLSearchParams(window.location.search || '').has('gid')) {
+          return true;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    if (isTargetPage()) {
+      return true;
+    }
+    if (/^\/p\/\d/i.test(p) || /^\/u\/\d/i.test(p) || /^\/n\//i.test(p)) {
+      return true;
+    }
+    if (/^\/\d{6,}(?:\/|$|[?#])/i.test(p)) {
       return true;
     }
     return false;
@@ -644,7 +682,7 @@
   }
 
   function hidePromoFeedItems() {
-    if (!isTargetPage()) {
+    if (!shouldRunPromoWbproHide()) {
       return;
     }
     const done = new Set();
@@ -667,9 +705,12 @@
 
     /**
      * 新版灰标：<div class="wbpro-tag wbpro-tag-c2"><div>荐读</div></div>
-     * 卡片在 div.wbpro-scroller-item 内；不依赖 roots / inPrimaryFeedContext 首轮过滤。
+     * 虚拟列表：只藏 article 易被 Vue 整块换掉；优先藏 vue-recycle-scroller__item-view / wbpro-scroller-item。
      */
-    for (const tag of document.querySelectorAll('.wbpro-tag')) {
+    for (const tag of document.querySelectorAll('.wbpro-tag.wbpro-tag-c2, .wbpro-tag')) {
+      if (tag.closest(SEL_PROMO_BLOCKED)) {
+        continue;
+      }
       if (!textMatchesPromoLabel(tag.textContent)) {
         continue;
       }
@@ -677,14 +718,18 @@
       if (cls.indexOf('wbpro-tag') < 0) {
         continue;
       }
-      const card = tag.closest('article');
-      if (!card) {
+      const article = tag.closest('article');
+      if (!article) {
         continue;
       }
-      if (card.closest('aside, [class*="sideBar"], [class*="SideBar"], [class*="side-bar"]')) {
+      if (article.closest('aside, [class*="sideBar"], [class*="SideBar"], [class*="side-bar"]')) {
         continue;
       }
-      markPromoHidden(card);
+      const host =
+        article.closest('.vue-recycle-scroller__item-view') ||
+        article.closest('div.wbpro-scroller-item') ||
+        article;
+      markPromoHidden(host);
     }
 
     const roots = document.querySelectorAll(
@@ -707,7 +752,7 @@
       if (done.has(card)) {
         continue;
       }
-      if (card.getAttribute(DATA_PROMO_BLOCKED) === '1') {
+      if (card.closest(SEL_PROMO_BLOCKED)) {
         done.add(card);
         continue;
       }
@@ -727,7 +772,7 @@
     if (!extractUid(anchor.getAttribute('href') || anchor.href)) return false;
     if (!inPrimaryFeedContext(anchor)) return false;
     const item = getFeedItem(anchor);
-    if (item && item.getAttribute(DATA_PROMO_BLOCKED) === '1') {
+    if (item && item.closest(SEL_PROMO_BLOCKED)) {
       return false;
     }
     if (item) {
@@ -764,10 +809,12 @@
   }
 
   function scanOnce() {
+    if (shouldRunPromoWbproHide()) {
+      hidePromoFeedItems();
+    }
     if (!isTargetPage()) {
       return;
     }
-    hidePromoFeedItems();
     for (const a of collectWeiboUserAnchorElements()) {
       if (!shouldInject(a)) continue;
       a.setAttribute('data-weibo-lajie-bound', '1');
