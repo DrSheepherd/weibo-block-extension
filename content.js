@@ -681,10 +681,34 @@
     return false;
   }
 
+  /**
+   * 虚拟列表会复用 vue-recycle-scroller__item-view：若曾在外层打标，新内容无荐读仍会 display:none。
+   * 每次扫描前摘掉「当前 DOM 已不构成推广灰标」的标记。
+   */
+  function clearStalePromoBlocked() {
+    for (const el of Array.from(document.querySelectorAll(SEL_PROMO_BLOCKED))) {
+      const article =
+        el.tagName === 'ARTICLE'
+          ? el
+          : el.querySelector && el.querySelector('article');
+      if (!article) {
+        el.removeAttribute(DATA_PROMO_BLOCKED);
+        el.style.removeProperty('display');
+        continue;
+      }
+      if (isPromoTaggedInMetaLine(article)) {
+        continue;
+      }
+      el.removeAttribute(DATA_PROMO_BLOCKED);
+      el.style.removeProperty('display');
+    }
+  }
+
   function hidePromoFeedItems() {
     if (!shouldRunPromoWbproHide()) {
       return;
     }
+    clearStalePromoBlocked();
     const done = new Set();
 
     function markPromoHidden(card) {
@@ -705,7 +729,7 @@
 
     /**
      * 新版灰标：<div class="wbpro-tag wbpro-tag-c2"><div>荐读</div></div>
-     * 虚拟列表：只藏 article 易被 Vue 整块换掉；优先藏 vue-recycle-scroller__item-view / wbpro-scroller-item。
+     * 勿在 vue-recycle-scroller__item-view 上打标（槽位复用会误杀下一条）；可用 wbpro-scroller-item 或 article。
      */
     for (const tag of document.querySelectorAll('.wbpro-tag.wbpro-tag-c2, .wbpro-tag')) {
       if (tag.closest(SEL_PROMO_BLOCKED)) {
@@ -725,10 +749,7 @@
       if (article.closest('aside, [class*="sideBar"], [class*="SideBar"], [class*="side-bar"]')) {
         continue;
       }
-      const host =
-        article.closest('.vue-recycle-scroller__item-view') ||
-        article.closest('div.wbpro-scroller-item') ||
-        article;
+      const host = article.closest('div.wbpro-scroller-item') || article;
       markPromoHidden(host);
     }
 
