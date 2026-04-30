@@ -1,0 +1,48 @@
+/* 仅装饰本扩展注入的节点，不修改微博原页面布局权重 */
+span.weibo-lajie-wrap {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+  line-height: 1.2;
+}
+
+button.weibo-lajie-btn {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  background: transparent;
+}
+
+/* 未拉黑 */
+button.weibo-lajie-btn.weibo-lajie--blocked-no {
+  color: #d93025;
+  background-color: rgba(233, 48, 37, 0.08);
+}
+
+button.weibo-lajie-btn.weibo-lajie--blocked-no:hover {
+  background-color: rgba(233, 48, 37, 0.16);
+}
+
+/* 已拉黑 */
+button.weibo-lajie-btn.weibo-lajie--blocked-yes {
+  color: #9e9e9e;
+  background-color: rgba(158, 158, 158, 0.12);
+  cursor: pointer;
+}
+
+button.weibo-lajie-btn.weibo-lajie--blocked-yes:hover {
+  background-color: rgba(158, 158, 158, 0.2);
+}
+
+button.weibo-lajie-btn.weibo-lajie--loading {
+  color: #9e9e9e;
+  background-color: rgba(158, 158, 158, 0.1);
+  cursor: wait;
+}
