@@ -78,7 +78,8 @@
     if (p === '/' || p === '/mygroups') {
       return true;
     }
-    if (/^\/hot\/weibo\/\d+$/i.test(p) || /^\/hot\/list\/\d+$/i.test(p)) {
+    /** 热门 tab：含 /hot、/hot/weibo/… 等（新版 SPA 路径多样） */
+    if (/^\/hot(\/|$)/i.test(p)) {
       return true;
     }
     return false;
@@ -146,6 +147,21 @@
     });
   }
 
+  /** 新版信息流卡片（woo-panel / wbpro 灰标），用于放宽「页脚」类祖先误判 */
+  function isWeiboFeedArticle(article) {
+    if (!article || article.tagName !== 'ARTICLE') {
+      return false;
+    }
+    const cn = String(article.className || '');
+    if (cn.indexOf('woo-panel') >= 0) {
+      return true;
+    }
+    if (article.querySelector('.wbpro-feed-content, .wbpro-tag')) {
+      return true;
+    }
+    return false;
+  }
+
   function getFeedItem(el) {
     if (!el || !el.closest) return null;
     return (
@@ -166,22 +182,25 @@
   }
 
   function inPrimaryFeedContext(a) {
-    if (location.hostname === 's.weibo.com') {
-      if (a.closest('footer, [class*="footer"]')) {
-        return false;
-      }
-    }
+    const feedArticle = a.closest && a.closest('article');
+    const inFeedArticle = feedArticle && isWeiboFeedArticle(feedArticle);
     const inMainColumn =
       a.closest(
         'main, [role="main"], #plc_main, #plc_frame, [class*="listContent"], ' +
           '[class*="List-content"], [class*="Frame_content"], [id*="pl_content"], #app, ' +
           '#v6_pl_content, [id*="_v6_"], [id*="_v6_pl_"], [id*="_pl_"], ' +
-          'div.card, .card-feed, .m-wrap',
+          'div.card, .card-feed, .m-wrap, [class*="wbpro-scroller"]',
       ) || (!a.closest('aside, [class*="sideBar"], [class*="side-bar"], nav[aria-label]'));
     if (a.closest('aside, [class*="sideBar"], [class*="side-bar"]') && !inMainColumn) {
       return false;
     }
-    if (a.closest('footer, [class*="footer"]')) return false;
+    /**
+     * 仅排除「整段在页脚/页脚类布局层内」的节点；信息流 article 内自带 <footer> 互动条，
+     * 且外层常有 class 含 footer 的布局容器，否则会整流不注入、荐读也不隐藏。
+     */
+    if (!inFeedArticle && a.closest('footer, [class*="footer"]')) {
+      return false;
+    }
     return true;
   }
 
@@ -629,8 +648,48 @@
       return;
     }
     const done = new Set();
+
+    function markPromoHidden(card) {
+      if (!card || !card.setAttribute) {
+        return;
+      }
+      if (done.has(card)) {
+        return;
+      }
+      if (card.getAttribute(DATA_PROMO_BLOCKED) === '1') {
+        done.add(card);
+        return;
+      }
+      card.setAttribute(DATA_PROMO_BLOCKED, '1');
+      card.style.setProperty('display', 'none', 'important');
+      done.add(card);
+    }
+
+    /**
+     * 新版灰标：<div class="wbpro-tag wbpro-tag-c2"><div>荐读</div></div>
+     * 卡片在 div.wbpro-scroller-item 内；不依赖 roots / inPrimaryFeedContext 首轮过滤。
+     */
+    for (const tag of document.querySelectorAll('.wbpro-tag')) {
+      if (!textMatchesPromoLabel(tag.textContent)) {
+        continue;
+      }
+      const cls = String(tag.className || '');
+      if (cls.indexOf('wbpro-tag') < 0) {
+        continue;
+      }
+      const card = tag.closest('article');
+      if (!card) {
+        continue;
+      }
+      if (card.closest('aside, [class*="sideBar"], [class*="SideBar"], [class*="side-bar"]')) {
+        continue;
+      }
+      markPromoHidden(card);
+    }
+
     const roots = document.querySelectorAll(
-      '#app article, article[class*="woo-panel"], ' +
+      'div.wbpro-scroller-item article, ' +
+        '#app article, article[class*="woo-panel"], ' +
         'main article, [role=main] article, #plc_frame article, #plc_main article, ' +
         'div[action-type="feed_list_item"], ' +
         '#v6_pl_content article, [id*="_v6_"] article, ' +
@@ -656,9 +715,7 @@
         done.add(card);
         continue;
       }
-      card.setAttribute(DATA_PROMO_BLOCKED, '1');
-      card.style.setProperty('display', 'none', 'important');
-      done.add(card);
+      markPromoHidden(card);
     }
   }
 

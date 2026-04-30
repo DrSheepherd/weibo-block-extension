@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "微博列表拉黑",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "在首页/热门/分组/搜索、实时/热门/视频 s 流等中，在发帖人昵称后提供拉黑/取消拉黑。",
   "background": {
     "service_worker": "background.js"
