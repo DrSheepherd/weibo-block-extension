@@ -36,13 +36,16 @@
   }
 
   /**
-   * s 站：综合搜索 / 实时 / 热门 / 视频等流式结果页（与主站流共用注入；拉黑走 SW+DNR）
+   * s 站：综合搜索 / 用户搜索 / 实时 / 热门 / 视频等流式结果页（与主站流共用注入；拉黑走 SW+DNR）
    */
   function isWeiboSearchResultPage() {
     if (location.hostname !== 's.weibo.com') {
       return false;
     }
     const p = normalizePath();
+    if (p === '/user' || /^\/user\//i.test(p)) {
+      return true;
+    }
     if (p === '/weibo' || /^\/weibo\//i.test(p)) {
       return true;
     }
