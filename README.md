@@ -1,6 +1,6 @@
 # 微博列表拉黑
 
-在首页/热门/分组/搜索、s 站用户搜索与综合/实时/热门/视频流等场景下，在发帖人昵称后提供「拉黑 / 已拉黑」快捷操作（详见 `manifest.json` 描述）。支持 **Chrome / Edge** 等 Chromium 内核浏览器。
+在首页/热门/分组/搜索、s 站用户搜索与综合/实时/热门/视频流等场景下，在发帖人昵称后提供「拉黑 / 已拉黑 / 本机屏蔽」快捷操作（详见 `manifest.json` 描述）。支持 **Chrome / Edge** 等 Chromium 内核浏览器。
 
 ## 声明
 
@@ -14,8 +14,10 @@
 
 | 能力 | 说明 | 主要位置 |
 |------|------|----------|
-| **拉黑 / 解黑** | 调微博 `aj` 接口，在列表里对 uid 屏蔽；状态缓存在 `chrome.storage.local` | `content.js` + `background.js` |
-| **灰标 / 推广卡隐藏** | 在 `content.js` 中。在**目标流**里扫描「推荐 / 荐读 / 广告」等灰标（含与时间在同一行时的短前缀、以及特定 `d.sinaimg.cn/prd/.../icon_auth_white` 小图），对命中的**整条微博卡片**做 `display: none`（`data-weibo-lajie-promo-blocked` 标记），与「是否拉黑该 uid」无直接关系 | `hidePromoFeedItems` 等 |
+| **拉黑 / 解黑** | 默认调微博 `aj` 接口；成功写入 `weiboLajieUids`（灰按钮「已拉黑」）。名单满（20185）时写入 `weiboLajieLocalOnlyUids`（橙按钮「本机屏蔽」），解黑不调服务器 | `content.js` + `background.js` |
+| **发帖人卡片隐藏** | 发帖人 uid 在任一名单内时整卡隐藏（`data-weibo-lajie-uid-hidden`）；转发里出现的他人 uid **不**处理 | `hideBlockedUidFeedItems` |
+| **名单管理（选项页）** | 扩展管理 → 本扩展详细信息 → **扩展程序选项**：本机屏蔽 / 微博已拉黑分栏、uid 筛选、取消操作 | `options.html` + `background.js` |
+| **灰标 / 推广卡隐藏** | 在 `content.js` 中。在**目标流**里扫描「推荐 / 荐读 / 广告」等灰标（含与时间在同一行时的短前缀、以及特定 `d.sinaimg.cn/prd/.../icon_auth_white` 小图），对命中的**整条微博卡片**做 `display: none`（`data-weibo-lajie-promo-blocked` 标记），与 uid 屏蔽独立 | `hidePromoFeedItems` 等 |
 
 第二项是**流内营销/广告样式**的整卡隐藏，**不是**系统级广告拦截、也不会屏蔽所有第三方资源；若微博改版灰标或 DOM 结构，需改选择器/关键词。
 
@@ -33,18 +35,22 @@
 
 | 项目 | 说明 |
 |------|------|
-| **本地** | 键名 `weiboLajieUids`，存在 `chrome.storage.local`，仅用于按钮显示「已拉黑」；**仅在拉黑接口返回成功（`code === 100000`）时写入** |
-| **服务器** | 微博「设置 → 屏蔽设置 → 用户」中的真实黑名单；人数上限见 [微博客服说明](https://kefu.weibo.com/faqdetail?id=18937)（非会员约 **5000**） |
-| **二者关系** | 本地条数**可能少于**服务器（例如在网页里拉黑过、或换浏览器后未同步）。本地不能用来判断「还能否新增拉黑」 |
+| **服务器名单（本地键）** | `weiboLajieUids`：拉黑接口 `100000` 成功时写入；与微博屏蔽设置一致（可用 `sync-blacklist-from-server.js` 覆盖对齐） |
+| **本机屏蔽（本地键）** | `weiboLajieLocalOnlyUids`：仅当接口返回 `100001` 且含 **20185**（名单已满）时写入；**不调**服务器解黑，只删本地键 |
+| **微博服务器** | 「设置 → 屏蔽设置 → 用户」；上限见 [客服说明](https://kefu.weibo.com/faqdetail?id=18937)（非会员约 **5000**） |
+| **隐藏** | 发帖人 uid 在以上任一键名单中时，流内整卡 `display:none`（与荐读隐藏类似；**不认**转发正文里的他人 uid） |
+| **按钮** | 灰「已拉黑」= 服务器；橙「本机屏蔽」= 仅本地；红「拉黑」= 未屏蔽 |
+| **名单管理** | **扩展管理** → 本扩展 **详细信息** → **扩展程序选项**（`options_ui`）：分栏列出本机屏蔽 / 微博已拉黑，可筛选 uid 并取消（流内卡片已隐藏时在此解黑） |
 
 ### 拉黑接口常见返回（`POST …/aj/filter/block?ajwvr=6`）
 
 | `code` | 典型 `msg` | 含义（经验） |
 |--------|------------|--------------|
 | **`100000`** | 屏蔽成功 | 成功；扩展会写入本地 uid |
-| **`100001`** | 屏蔽失败(20185) 等 | 失败；**常见原因之一**是服务器黑名单已满（`total` ≥ 上限），无法新增新人；对**已在名单内**的 uid 再拉黑往往仍为 `100000`（幂等） |
+| **`100001`** | 屏蔽失败(20185) 等 | 常见为服务器名单已满；扩展会改为**本机屏蔽**（写入 `weiboLajieLocalOnlyUids` 并隐藏发帖人卡片）。其它 `100001` 仍视为失败，按钮保持「拉黑」 |
+| **已在名单内** | 屏蔽成功 | 重复拉黑多为 `100000`（幂等） |
 
-失败时扩展仅在控制台输出日志，页面上按钮恢复为「拉黑」。在 `www.weibo.com` 上自查服务器名单人数（须**同源**请求，例如 `/ajax/setting/getFilteredUsers?page=1&count=50`，不要用 `weibo.com` 与 `www.weibo.com` 混用以免 CORS）。
+在 `www.weibo.com` 上自查服务器名单人数须**同源**请求（例如 `/ajax/setting/getFilteredUsers?page=1&count=50`）。
 
 ---
 
@@ -156,6 +162,26 @@ flowchart LR
 3. 「加载已解压的扩展程序」，选择本目录 `weibo-block-extension`。
 4. 更新代码后在该页点击扩展卡片的「重新加载」。
 5. 须保持**已登录** `weibo.com` / `www.weibo.com` 后使用拉黑功能。
+6. **解黑 / 取消本机屏蔽**：见下方「名单管理（扩展程序选项）」。取消「微博已拉黑」时需至少有一个已登录的微博标签页。
+
+---
+
+## 名单管理（扩展程序选项）
+
+**入口（Chrome / Edge）**
+
+1. 打开 `chrome://extensions` 或 `edge://extensions`
+2. 找到「微博列表拉黑」→ **详细信息**（或「管理扩展」进入详情）
+3. 点击 **扩展程序选项**（英文界面多为 *Extension options*）
+
+将在新标签页打开 `options.html`（`manifest` 中 `options_ui.open_in_tab: true`）。
+
+| 区块 | 操作 |
+|------|------|
+| **本机屏蔽** | **拉黑**：调服务器 `block`，成功则迁入 `weiboLajieUids`；失败显示 `code`/`msg` 且名单不变。**取消本机屏蔽**：仅删 `weiboLajieLocalOnlyUids` |
+| **微博已拉黑** | 调 `delblack` 成功后从 `weiboLajieUids` 移除（并清除该 uid 的本机项） |
+
+文件：`options.html`、`options.js`、`options.css`；后台消息见 `background.js` 中 `weiboLajiePopup*`。
 
 ---
 

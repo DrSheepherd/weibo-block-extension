@@ -1,8 +1,12 @@
 {
   "manifest_version": 3,
   "name": "微博列表拉黑",
-  "version": "1.2.9",
-  "description": "在首页/热门/分组/搜索、s 站用户搜索与综合/实时/热门/视频流等中，在昵称后提供拉黑/取消拉黑。",
+  "version": "1.3.3",
+  "description": "在首页/热门/分组/搜索等流中拉黑/本机屏蔽并隐藏卡片；在扩展详情页的「扩展程序选项」中管理名单与解黑。",
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "background.js"
   },

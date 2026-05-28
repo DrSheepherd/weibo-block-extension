@@ -10,7 +10,7 @@
  *
  * 【注意】
  * - 须已登录；请求走扩展 SW，带 weibo.com Cookie
- * - 用服务器名单覆盖本地，不与本地合并
+ * - 用服务器名单覆盖 weiboLajieUids，不与本地合并；不修改 weiboLajieLocalOnlyUids（本机屏蔽）
  * - 黑名单已满（如 total≥5000）时仍可对齐已有名单，但无法新增拉黑
  * - 若遇 418，把末尾 sleep 改为 500～800ms 后重跑
  *

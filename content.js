@@ -2,11 +2,16 @@
   'use strict';
 
   const STORAGE_KEY = 'weiboLajieUids';
+  /** 服务器名单已满(20185)时仅本机记录，解黑不调 delblack */
+  const STORAGE_KEY_LOCAL = 'weiboLajieLocalOnlyUids';
   const WRAP_CLASS = 'weibo-lajie-wrap';
   /** 日期行前的灰标：整卡隐藏，不进入列表展示 */
   const PROMO_TAG_WORDS = ['推荐', '荐读', '广告'];
   const DATA_PROMO_BLOCKED = 'data-weibo-lajie-promo-blocked';
   const SEL_PROMO_BLOCKED = '[' + DATA_PROMO_BLOCKED + '="1"]';
+  /** 发帖人在拉黑/本机屏蔽名单内：整卡隐藏（仅认作者 uid，不管转发正文里的他人） */
+  const DATA_UID_BLOCKED = 'data-weibo-lajie-uid-hidden';
+  const SEL_UID_BLOCKED = '[' + DATA_UID_BLOCKED + '="1"]';
   /** 相对卡片顶部的最大竖直距离，避免误伤正文里偶然只有两字的块 */
   const PROMO_MAX_TOP_OFFSET = 200;
   /** 灰标「广告」为图片时，prd 下该资源，见 d.sinaimg.cn/prd/1005/891/.../icon_auth_white.png */
@@ -404,7 +409,8 @@
     return null;
   }
 
-  let cachedSet = new Set();
+  let cachedServerSet = new Set();
+  let cachedLocalSet = new Set();
   let storageReady = false;
   const storageWaiters = [];
 
@@ -430,29 +436,65 @@
       flushWaiters();
       return;
     }
-    chrome.storage.local.get([STORAGE_KEY], (r) => {
+    chrome.storage.local.get([STORAGE_KEY, STORAGE_KEY_LOCAL], (r) => {
       const list = r && r[STORAGE_KEY];
-      const arr = Array.isArray(list) ? list : [];
-      cachedSet = new Set(arr.map(String));
+      const listLocal = r && r[STORAGE_KEY_LOCAL];
+      cachedServerSet = new Set((Array.isArray(list) ? list : []).map(String));
+      cachedLocalSet = new Set((Array.isArray(listLocal) ? listLocal : []).map(String));
       storageReady = true;
       flushWaiters();
     });
   }
 
-  function persistIdSet() {
+  function persistIdSets() {
     if (typeof chrome === 'undefined' || !chrome.storage) return;
-    const arr = Array.from(cachedSet);
-    chrome.storage.local.set({ [STORAGE_KEY]: arr });
+    chrome.storage.local.set({
+      [STORAGE_KEY]: Array.from(cachedServerSet),
+      [STORAGE_KEY_LOCAL]: Array.from(cachedLocalSet),
+    });
   }
 
-  function isBlocked(uid) {
-    return cachedSet && cachedSet.has(String(uid));
+  function isServerBlocked(uid) {
+    return cachedServerSet && cachedServerSet.has(String(uid));
+  }
+
+  function isLocalOnlyBlocked(uid) {
+    return cachedLocalSet && cachedLocalSet.has(String(uid));
+  }
+
+  /** @returns {'none'|'server'|'local'} */
+  function getBlockTier(uid) {
+    const s = String(uid);
+    if (isServerBlocked(s)) {
+      return 'server';
+    }
+    if (isLocalOnlyBlocked(s)) {
+      return 'local';
+    }
+    return 'none';
+  }
+
+  function isAnyBlocked(uid) {
+    return getBlockTier(uid) !== 'none';
   }
 
   function isWeiboOk(data) {
     if (!data || typeof data !== 'object') return false;
     const c = data.code;
     return c == 100000 || c === '100000' || c === 100000;
+  }
+
+  /** 服务器黑名单已满，无法新增（常见 msg 含 20185） */
+  function isBlacklistFullError(data) {
+    if (!data || typeof data !== 'object') {
+      return false;
+    }
+    const c = data.code;
+    if (c != 100001 && c !== '100001' && c !== 100001) {
+      return false;
+    }
+    const msg = String(data.msg || data.message || '');
+    return msg.indexOf('20185') >= 0;
   }
 
   function sendToBackground(msg) {
@@ -485,20 +527,31 @@
   }
 
   function applyButtonState(btn, uid) {
-    const blocked = isBlocked(uid);
-    btn.classList.remove('weibo-lajie--blocked-yes', 'weibo-lajie--blocked-no', 'weibo-lajie--loading');
+    const tier = getBlockTier(uid);
+    btn.classList.remove(
+      'weibo-lajie--blocked-yes',
+      'weibo-lajie--blocked-local',
+      'weibo-lajie--blocked-no',
+      'weibo-lajie--loading',
+    );
     btn.disabled = false;
-    if (blocked) {
+    if (tier === 'server') {
       btn.classList.add('weibo-lajie--blocked-yes');
       btn.textContent = '已拉黑';
+      btn.title = '已在微博屏蔽名单；取消拉黑请打开扩展管理 → 本扩展详细信息 → 扩展程序选项';
+    } else if (tier === 'local') {
+      btn.classList.add('weibo-lajie--blocked-local');
+      btn.textContent = '本机屏蔽';
+      btn.title = '仅本浏览器隐藏；取消请打开扩展管理 → 本扩展详细信息 → 扩展程序选项';
     } else {
       btn.classList.add('weibo-lajie--blocked-no');
       btn.textContent = '拉黑';
+      btn.title = '';
     }
   }
 
   function setButtonLoading(btn) {
-    btn.classList.remove('weibo-lajie--blocked-yes', 'weibo-lajie--blocked-no');
+    btn.classList.remove('weibo-lajie--blocked-yes', 'weibo-lajie--blocked-local', 'weibo-lajie--blocked-no');
     btn.classList.add('weibo-lajie--loading');
     btn.textContent = '处理中';
     btn.disabled = true;
@@ -509,36 +562,53 @@
     document.querySelectorAll(sel).forEach((b) => applyButtonState(b, uid));
   }
 
+  function afterBlockStateChanged(uid) {
+    persistIdSets();
+    syncAllButtonsForUid(uid);
+    requestAnimationFrame(() => {
+      scanOnce();
+    });
+  }
+
   async function onToggleClick(btn, uid) {
     if (btn.disabled) return;
     setButtonLoading(btn);
+    const id = String(uid);
+    const tier = getBlockTier(id);
     try {
-      const wasBlocked = isBlocked(uid);
-      if (!wasBlocked) {
+      if (tier === 'none') {
         const data = await apiBlockUser(uid);
-        if (!isWeiboOk(data)) {
-          // eslint-disable-next-line no-console
-          console.error('[weibo-lajie] 拉黑失败', data);
-          applyButtonState(btn, uid);
+        if (isWeiboOk(data)) {
+          cachedLocalSet.delete(id);
+          cachedServerSet.add(id);
+          afterBlockStateChanged(id);
           return;
         }
-        cachedSet.add(String(uid));
-        persistIdSet();
-        applyButtonState(btn, uid);
-        syncAllButtonsForUid(uid);
-      } else {
-        const data = await apiUnblockUser(uid);
-        if (!isWeiboOk(data)) {
-          // eslint-disable-next-line no-console
-          console.error('[weibo-lajie] 取消拉黑失败', data);
-          applyButtonState(btn, uid);
+        if (isBlacklistFullError(data)) {
+          cachedLocalSet.add(id);
+          afterBlockStateChanged(id);
           return;
         }
-        cachedSet.delete(String(uid));
-        persistIdSet();
+        // eslint-disable-next-line no-console
+        console.error('[weibo-lajie] 拉黑失败', data);
         applyButtonState(btn, uid);
-        syncAllButtonsForUid(uid);
+        return;
       }
+      if (tier === 'local') {
+        cachedLocalSet.delete(id);
+        afterBlockStateChanged(id);
+        return;
+      }
+      const data = await apiUnblockUser(uid);
+      if (!isWeiboOk(data)) {
+        // eslint-disable-next-line no-console
+        console.error('[weibo-lajie] 取消拉黑失败', data);
+        applyButtonState(btn, uid);
+        return;
+      }
+      cachedServerSet.delete(id);
+      cachedLocalSet.delete(id);
+      afterBlockStateChanged(id);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[weibo-lajie] 请求异常', e);
@@ -788,6 +858,89 @@
     }
   }
 
+  /** 仅发帖人 uid（与注入拉黑按钮时同一套作者链逻辑） */
+  function getAuthorUidFromFeedCard(card) {
+    if (!card) {
+      return null;
+    }
+    const article =
+      card.tagName === 'ARTICLE' ? card : card.querySelector && card.querySelector('article');
+    const item = article || card;
+    const link = findAuthorNameUserLinkInFeedItem(item);
+    if (!link) {
+      return null;
+    }
+    return extractUid(link.getAttribute('href') || link.href);
+  }
+
+  function clearStaleUidBlocked() {
+    for (const el of Array.from(document.querySelectorAll(SEL_UID_BLOCKED))) {
+      const uid = getAuthorUidFromFeedCard(el);
+      if (uid && isAnyBlocked(uid)) {
+        continue;
+      }
+      el.removeAttribute(DATA_UID_BLOCKED);
+      el.style.removeProperty('display');
+    }
+  }
+
+  function hideBlockedUidFeedItems() {
+    if (!shouldRunPromoWbproHide()) {
+      return;
+    }
+    if (!cachedServerSet.size && !cachedLocalSet.size) {
+      return;
+    }
+    clearStaleUidBlocked();
+    const done = new Set();
+
+    function markUidHidden(host) {
+      if (!host || !host.setAttribute) {
+        return;
+      }
+      if (done.has(host)) {
+        return;
+      }
+      if (host.getAttribute(DATA_UID_BLOCKED) === '1') {
+        done.add(host);
+        return;
+      }
+      host.setAttribute(DATA_UID_BLOCKED, '1');
+      host.style.setProperty('display', 'none', 'important');
+      done.add(host);
+    }
+
+    const roots = document.querySelectorAll(
+      'div.wbpro-scroller-item article, ' +
+        '#app article, article[class*="woo-panel"], ' +
+        'main article, [role=main] article, #plc_frame article, #plc_main article, ' +
+        'div[action-type="feed_list_item"], ' +
+        '#v6_pl_content article, [id*="_v6_"] article, ' +
+        'div[action-type="feed"], div.card, div.card-feed',
+    );
+    for (const n of roots) {
+      if (!n.closest) {
+        continue;
+      }
+      if (!inPrimaryFeedContext(n)) {
+        continue;
+      }
+      const card =
+        getFeedItem(n) || n.closest('article, div[action-type="feed_list_item"], div.card, div.card-feed') || n;
+      if (done.has(card)) {
+        continue;
+      }
+      const uid = getAuthorUidFromFeedCard(card);
+      if (!uid || !isAnyBlocked(uid)) {
+        done.add(card);
+        continue;
+      }
+      const article = card.tagName === 'ARTICLE' ? card : card.querySelector && card.querySelector('article');
+      const host = (article && article.closest('div.wbpro-scroller-item')) || article || card;
+      markUidHidden(host);
+    }
+  }
+
   function shouldInject(anchor) {
     if (anchor.getAttribute('data-weibo-lajie-bound') === '1') return false;
     if (anchor.nextElementSibling && anchor.nextElementSibling.classList.contains(WRAP_CLASS)) {
@@ -796,7 +949,7 @@
     if (!extractUid(anchor.getAttribute('href') || anchor.href)) return false;
     if (!inPrimaryFeedContext(anchor)) return false;
     const item = getFeedItem(anchor);
-    if (item && item.closest(SEL_PROMO_BLOCKED)) {
+    if (item && (item.closest(SEL_PROMO_BLOCKED) || item.closest(SEL_UID_BLOCKED))) {
       return false;
     }
     if (item) {
@@ -835,6 +988,7 @@
   function scanOnce() {
     if (shouldRunPromoWbproHide()) {
       hidePromoFeedItems();
+      hideBlockedUidFeedItems();
     }
     if (!isTargetPage()) {
       return;
@@ -901,13 +1055,28 @@
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== 'local' || !changes[STORAGE_KEY]) return;
-      const n = changes[STORAGE_KEY].newValue;
-      const arr = Array.isArray(n) ? n : [];
-      cachedSet = new Set(arr.map(String));
+      if (area !== 'local') {
+        return;
+      }
+      if (!changes[STORAGE_KEY] && !changes[STORAGE_KEY_LOCAL]) {
+        return;
+      }
+      if (changes[STORAGE_KEY]) {
+        const n = changes[STORAGE_KEY].newValue;
+        cachedServerSet = new Set((Array.isArray(n) ? n : []).map(String));
+      }
+      if (changes[STORAGE_KEY_LOCAL]) {
+        const n = changes[STORAGE_KEY_LOCAL].newValue;
+        cachedLocalSet = new Set((Array.isArray(n) ? n : []).map(String));
+      }
       document.querySelectorAll('.weibo-lajie-btn[data-uid]').forEach((b) => {
         const u = b.getAttribute('data-uid');
-        if (u) applyButtonState(b, u);
+        if (u) {
+          applyButtonState(b, u);
+        }
+      });
+      requestAnimationFrame(() => {
+        scanOnce();
       });
     });
   }

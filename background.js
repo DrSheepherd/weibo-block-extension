@@ -300,6 +300,115 @@ function isSearchWeiboPage(tabUrl) {
   }
 }
 
+const STORAGE_KEY = 'weiboLajieUids';
+const STORAGE_KEY_LOCAL = 'weiboLajieLocalOnlyUids';
+
+function isWeiboOk(data) {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  const c = data.code;
+  return c == 100000 || c === '100000' || c === 100000;
+}
+
+async function findWeiboTab() {
+  const urlPatterns = ['https://www.weibo.com/*', 'https://weibo.com/*', 'https://s.weibo.com/*'];
+  let tabs = await chrome.tabs.query({ url: urlPatterns });
+  if (!tabs.length) {
+    const all = await chrome.tabs.query({ currentWindow: true });
+    tabs = all.filter((t) => t.url && /(^|\.)weibo\.com/i.test(t.url));
+  }
+  if (!tabs.length) {
+    return null;
+  }
+  const active = tabs.find((t) => t.active);
+  const tab = active || tabs[0];
+  return { id: tab.id, url: tab.url || 'https://www.weibo.com/' };
+}
+
+function storageGetLists() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([STORAGE_KEY, STORAGE_KEY_LOCAL], (r) => {
+      const server = (Array.isArray(r[STORAGE_KEY]) ? r[STORAGE_KEY] : []).map(String);
+      const local = (Array.isArray(r[STORAGE_KEY_LOCAL]) ? r[STORAGE_KEY_LOCAL] : []).map(String);
+      resolve({ server, local });
+    });
+  });
+}
+
+function storageRemoveUid(uid, which) {
+  const id = String(uid);
+  return new Promise((resolve) => {
+    chrome.storage.local.get([STORAGE_KEY, STORAGE_KEY_LOCAL], (r) => {
+      const server = new Set((Array.isArray(r[STORAGE_KEY]) ? r[STORAGE_KEY] : []).map(String));
+      const local = new Set((Array.isArray(r[STORAGE_KEY_LOCAL]) ? r[STORAGE_KEY_LOCAL] : []).map(String));
+      if (which === 'local' || which === 'both') {
+        local.delete(id);
+      }
+      if (which === 'server' || which === 'both') {
+        server.delete(id);
+      }
+      chrome.storage.local.set(
+        {
+          [STORAGE_KEY]: Array.from(server),
+          [STORAGE_KEY_LOCAL]: Array.from(local),
+        },
+        () => resolve(),
+      );
+    });
+  });
+}
+
+/** 本机屏蔽项拉黑成功后：从 local 移除并加入 server 名单 */
+function storagePromoteLocalToServer(uid) {
+  const id = String(uid);
+  return new Promise((resolve) => {
+    chrome.storage.local.get([STORAGE_KEY, STORAGE_KEY_LOCAL], (r) => {
+      const server = new Set((Array.isArray(r[STORAGE_KEY]) ? r[STORAGE_KEY] : []).map(String));
+      const local = new Set((Array.isArray(r[STORAGE_KEY_LOCAL]) ? r[STORAGE_KEY_LOCAL] : []).map(String));
+      local.delete(id);
+      server.add(id);
+      chrome.storage.local.set(
+        {
+          [STORAGE_KEY]: Array.from(server),
+          [STORAGE_KEY_LOCAL]: Array.from(local),
+        },
+        () => resolve(),
+      );
+    });
+  });
+}
+
+async function requestWeiboBlock(tabId, pageUrl, uid) {
+  const search = isSearchWeiboPage(pageUrl);
+  if (search) {
+    return postWeiboBlockInWorker(tabId, pageUrl, String(uid));
+  }
+  const r = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: weiboLajiePostBlockInPage,
+    args: [String(uid)],
+  });
+  const data = r && r[0] && r[0].result;
+  return data == null ? { code: 0, msg: '无返回数据' } : data;
+}
+
+async function requestWeiboUnblock(tabId, pageUrl, uid) {
+  const search = isSearchWeiboPage(pageUrl);
+  if (search) {
+    return postWeiboUnblockInWorker(tabId, pageUrl, String(uid));
+  }
+  const r = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: weiboLajiePostUnblockInPage,
+    args: [String(uid)],
+  });
+  const data = r && r[0] && r[0].result;
+  return data == null ? { code: 0, msg: '无返回数据' } : data;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object' || !msg.type) {
     return false;
@@ -316,21 +425,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       try {
-        let data;
-        if (search) {
-          data = await postWeiboBlockInWorker(tabId, pageUrl, String(msg.uid));
-        } else {
-          const r = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: 'MAIN',
-            func: weiboLajiePostBlockInPage,
-            args: [String(msg.uid)],
-          });
-          data = r && r[0] && r[0].result;
-        }
-        if (data == null) {
-          data = { code: 0, msg: '无返回数据' };
-        }
+        const data = await requestWeiboBlock(tabId, pageUrl, String(msg.uid));
         sendResponse({ data });
       } catch (e) {
         sendResponse({ error: String(e) });
@@ -345,21 +440,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       try {
-        let data;
-        if (search) {
-          data = await postWeiboUnblockInWorker(tabId, pageUrl, String(msg.uid));
-        } else {
-          const r = await chrome.scripting.executeScript({
-            target: { tabId },
-            world: 'MAIN',
-            func: weiboLajiePostUnblockInPage,
-            args: [String(msg.uid)],
-          });
-          data = r && r[0] && r[0].result;
-        }
-        if (data == null) {
-          data = { code: 0, msg: '无返回数据' };
-        }
+        const data = await requestWeiboUnblock(tabId, pageUrl, String(msg.uid));
         sendResponse({ data });
       } catch (e) {
         sendResponse({ error: String(e) });
@@ -367,5 +448,83 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+
+  if (msg.type === 'weiboLajiePopupGetLists') {
+    (async () => {
+      try {
+        const { server, local } = await storageGetLists();
+        const serverSet = new Set(server);
+        const localOnly = local.filter((u) => !serverSet.has(u));
+        server.sort();
+        localOnly.sort();
+        sendResponse({ server, localOnly });
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'weiboLajiePopupBlockServer' && msg.uid) {
+    (async () => {
+      try {
+        const tab = await findWeiboTab();
+        if (!tab) {
+          sendResponse({ error: '请先打开并登录 weibo.com / www.weibo.com 或 s.weibo.com 页面' });
+          return;
+        }
+        const data = await requestWeiboBlock(tab.id, tab.url, String(msg.uid));
+        if (!isWeiboOk(data)) {
+          const code = data && data.code != null ? data.code : '—';
+          const m = (data && (data.msg || data.message)) || '未知错误';
+          sendResponse({
+            error: '拉黑失败 code=' + code + ' msg=' + m,
+            data,
+          });
+          return;
+        }
+        await storagePromoteLocalToServer(String(msg.uid));
+        sendResponse({ ok: true, data });
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'weiboLajiePopupRemoveLocal' && msg.uid) {
+    (async () => {
+      try {
+        await storageRemoveUid(String(msg.uid), 'local');
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'weiboLajiePopupUnblockServer' && msg.uid) {
+    (async () => {
+      try {
+        const tab = await findWeiboTab();
+        if (!tab) {
+          sendResponse({ error: '请先打开并登录 weibo.com / www.weibo.com 或 s.weibo.com 页面' });
+          return;
+        }
+        const data = await requestWeiboUnblock(tab.id, tab.url, String(msg.uid));
+        if (!isWeiboOk(data)) {
+          sendResponse({ error: (data && data.msg) || '取消拉黑失败', data });
+          return;
+        }
+        await storageRemoveUid(String(msg.uid), 'both');
+        sendResponse({ ok: true, data });
+      } catch (e) {
+        sendResponse({ error: String(e) });
+      }
+    })();
+    return true;
+  }
+
   return false;
 });
