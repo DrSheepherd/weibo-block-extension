@@ -1,13 +1,16 @@
 (function () {
   'use strict';
 
+  /** 搜索命中过多时仅渲染前 N 条，避免 DOM 过大 */
+  const MAX_DISPLAY = 100;
+
   const $filter = document.getElementById('filter');
   const $reload = document.getElementById('reload');
   const $status = document.getElementById('status');
   const $listLocal = document.getElementById('list-local');
   const $listServer = document.getElementById('list-server');
-  const $emptyLocal = document.getElementById('empty-local');
-  const $emptyServer = document.getElementById('empty-server');
+  const $hintLocal = document.getElementById('hint-local');
+  const $hintServer = document.getElementById('hint-server');
   const $countLocal = document.getElementById('count-local');
   const $countServer = document.getElementById('count-server');
 
@@ -44,18 +47,57 @@
     return 'https://weibo.com/u/' + encodeURIComponent(uid);
   }
 
-  function matchFilter(uid, q) {
+  function getSearchQuery() {
+    return ($filter.value || '').trim();
+  }
+
+  function filterUids(uids, q) {
     if (!q) {
-      return true;
+      return [];
     }
-    return String(uid).indexOf(q) >= 0;
+    return uids.filter((u) => String(u).indexOf(q) >= 0);
+  }
+
+  function setListHint(el, kind, extra) {
+    el.className = 'list-hint' + (kind ? ' list-hint--' + kind : '');
+    el.textContent = extra || '';
+  }
+
+  function updateSectionHints(total, matched, displayed) {
+    const q = getSearchQuery();
+    return function apply($hint) {
+      if (!q) {
+        setListHint(
+          $hint,
+          'idle',
+          total > 0
+            ? '共 ' + total + ' 条，请输入 uid 片段后展示匹配结果（不默认列出全部）'
+            : '暂无记录',
+        );
+        return;
+      }
+      if (matched === 0) {
+        setListHint($hint, 'nomatch', '无匹配「' + q + '」');
+        return;
+      }
+      if (matched > displayed) {
+        setListHint(
+          $hint,
+          'cap',
+          '匹配 ' + matched + ' 条，仅展示前 ' + MAX_DISPLAY + ' 条，请缩小搜索',
+        );
+        return;
+      }
+      setListHint($hint, 'ok', '匹配 ' + matched + ' 条');
+    };
   }
 
   function renderList(ul, uids, btnClass, btnLabel, onClick) {
     ul.textContent = '';
-    const q = ($filter.value || '').trim();
-    const filtered = uids.filter((u) => matchFilter(u, q));
-    for (const uid of filtered) {
+    const q = getSearchQuery();
+    const matched = filterUids(uids, q);
+    const slice = matched.slice(0, MAX_DISPLAY);
+    for (const uid of slice) {
       const li = document.createElement('li');
       const a = document.createElement('a');
       a.className = 'uid-link';
@@ -72,14 +114,15 @@
       li.appendChild(btn);
       ul.appendChild(li);
     }
-    return filtered.length;
+    return { matched: matched.length, displayed: slice.length };
   }
 
   function renderLocalList() {
     $listLocal.textContent = '';
-    const q = ($filter.value || '').trim();
-    const filtered = localOnlyAll.filter((u) => matchFilter(u, q));
-    for (const uid of filtered) {
+    const q = getSearchQuery();
+    const matched = filterUids(localOnlyAll, q);
+    const slice = matched.slice(0, MAX_DISPLAY);
+    for (const uid of slice) {
       const li = document.createElement('li');
       const a = document.createElement('a');
       a.className = 'uid-link';
@@ -144,22 +187,15 @@
       li.appendChild(actions);
       $listLocal.appendChild(li);
     }
-    return filtered.length;
-  }
-
-  function updateEmpty() {
-    const q = ($filter.value || '').trim();
-    const localShown = localOnlyAll.filter((u) => matchFilter(u, q)).length;
-    const serverShown = serverAll.filter((u) => matchFilter(u, q)).length;
-    $emptyLocal.classList.toggle('hidden', localShown > 0);
-    $emptyServer.classList.toggle('hidden', serverShown > 0);
-    $countLocal.textContent = String(localOnlyAll.length);
-    $countServer.textContent = String(serverAll.length);
+    return { matched: matched.length, displayed: slice.length };
   }
 
   function paint() {
-    renderLocalList();
-    renderList($listServer, serverAll, 'btn-server', '取消拉黑', async (uid, btn) => {
+    $countLocal.textContent = String(localOnlyAll.length);
+    $countServer.textContent = String(serverAll.length);
+
+    const localStats = renderLocalList();
+    const serverStats = renderList($listServer, serverAll, 'btn-server', '取消拉黑', async (uid, btn) => {
       btn.disabled = true;
       setStatus('请求微博接口…');
       try {
@@ -173,7 +209,17 @@
         btn.disabled = false;
       }
     });
-    updateEmpty();
+
+    updateSectionHints(
+      localOnlyAll.length,
+      localStats.matched,
+      localStats.displayed,
+    )($hintLocal);
+    updateSectionHints(
+      serverAll.length,
+      serverStats.matched,
+      serverStats.displayed,
+    )($hintServer);
   }
 
   async function load() {

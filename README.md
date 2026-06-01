@@ -176,6 +176,9 @@ flowchart LR
 
 将在新标签页打开 `options.html`（`manifest` 中 `options_ui.open_in_tab: true`）。
 
+- **默认不展示全量列表**：仅显示各区块**总条数**；在搜索框输入 uid 片段后才渲染匹配项（单次最多展示 100 条，过多请缩小搜索）。
+- 流内拉黑/解黑写入 storage 时**仅更新变更的键**，并 **300ms 防抖**合并连续写入。
+
 | 区块 | 操作 |
 |------|------|
 | **本机屏蔽** | **拉黑**：调服务器 `block`，成功则迁入 `weiboLajieUids`；失败显示 `code`/`msg` 且名单不变。**取消本机屏蔽**：仅删 `weiboLajieLocalOnlyUids` |

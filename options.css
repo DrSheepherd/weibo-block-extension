@@ -111,9 +111,32 @@ body {
 }
 
 .sub {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 12px;
   color: #888;
+}
+
+.list-hint {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #888;
+}
+
+.list-hint--idle {
+  color: #666;
+}
+
+.list-hint--nomatch {
+  color: #999;
+}
+
+.list-hint--cap {
+  color: #b45309;
+}
+
+.list-hint--ok {
+  color: #2e7d32;
+  font-size: 12px;
 }
 
 .list {
@@ -200,16 +223,6 @@ body {
 
 .btn-server:hover {
   background: rgba(158, 158, 158, 0.25);
-}
-
-.empty {
-  margin: 0;
-  font-size: 13px;
-  color: #aaa;
-}
-
-.empty.hidden {
-  display: none;
 }
 
 .list:empty {

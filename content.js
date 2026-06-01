@@ -413,6 +413,9 @@
   let cachedLocalSet = new Set();
   let storageReady = false;
   const storageWaiters = [];
+  const PERSIST_DEBOUNCE_MS = 300;
+  let persistDirty = { server: false, local: false };
+  let persistTimer = null;
 
   function onStorageReady(cb) {
     if (storageReady) cb();
@@ -446,12 +449,64 @@
     });
   }
 
-  function persistIdSets() {
-    if (typeof chrome === 'undefined' || !chrome.storage) return;
-    chrome.storage.local.set({
-      [STORAGE_KEY]: Array.from(cachedServerSet),
-      [STORAGE_KEY_LOCAL]: Array.from(cachedLocalSet),
-    });
+  function markPersistDirty(which) {
+    if (!which || which === 'both') {
+      persistDirty.server = true;
+      persistDirty.local = true;
+      return;
+    }
+    if (which === 'server') {
+      persistDirty.server = true;
+    }
+    if (which === 'local') {
+      persistDirty.local = true;
+    }
+  }
+
+  function doPersistIdSets() {
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+      return;
+    }
+    if (!persistDirty.server && !persistDirty.local) {
+      return;
+    }
+    const payload = {};
+    if (persistDirty.server) {
+      payload[STORAGE_KEY] = Array.from(cachedServerSet);
+      persistDirty.server = false;
+    }
+    if (persistDirty.local) {
+      payload[STORAGE_KEY_LOCAL] = Array.from(cachedLocalSet);
+      persistDirty.local = false;
+    }
+    chrome.storage.local.set(payload);
+  }
+
+  function flushPersistIdSetsNow() {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    doPersistIdSets();
+  }
+
+  /** @param {'server'|'local'|'both'} [which] 仅写入变更的 storage 键；默认 both */
+  function schedulePersistIdSets(which) {
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+      return;
+    }
+    markPersistDirty(which || 'both');
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+    }
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      doPersistIdSets();
+    }, PERSIST_DEBOUNCE_MS);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', flushPersistIdSetsNow);
   }
 
   function isServerBlocked(uid) {
@@ -562,8 +617,8 @@
     document.querySelectorAll(sel).forEach((b) => applyButtonState(b, uid));
   }
 
-  function afterBlockStateChanged(uid) {
-    persistIdSets();
+  function afterBlockStateChanged(uid, persistWhich) {
+    schedulePersistIdSets(persistWhich);
     syncAllButtonsForUid(uid);
     requestAnimationFrame(() => {
       scanOnce();
@@ -581,12 +636,12 @@
         if (isWeiboOk(data)) {
           cachedLocalSet.delete(id);
           cachedServerSet.add(id);
-          afterBlockStateChanged(id);
+          afterBlockStateChanged(id, 'both');
           return;
         }
         if (isBlacklistFullError(data)) {
           cachedLocalSet.add(id);
-          afterBlockStateChanged(id);
+          afterBlockStateChanged(id, 'local');
           return;
         }
         // eslint-disable-next-line no-console
@@ -596,7 +651,7 @@
       }
       if (tier === 'local') {
         cachedLocalSet.delete(id);
-        afterBlockStateChanged(id);
+        afterBlockStateChanged(id, 'local');
         return;
       }
       const data = await apiUnblockUser(uid);
@@ -608,7 +663,7 @@
       }
       cachedServerSet.delete(id);
       cachedLocalSet.delete(id);
-      afterBlockStateChanged(id);
+      afterBlockStateChanged(id, 'both');
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[weibo-lajie] 请求异常', e);

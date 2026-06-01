@@ -14,10 +14,15 @@
         <strong>扩展程序选项</strong>（Chrome / Edge：<code>chrome://extensions</code> 或
         <code>edge://extensions</code>）
       </p>
-      <p class="hint">流内卡片已隐藏；取消拉黑 / 本机屏蔽请在此操作</p>
+      <p class="hint">流内卡片已隐藏；取消拉黑 / 本机屏蔽请在此操作（需先搜索 uid，不默认展示全量列表）</p>
     </header>
     <div class="toolbar">
-      <input type="search" id="filter" placeholder="按 uid 筛选…" autocomplete="off" />
+      <input
+        type="search"
+        id="filter"
+        placeholder="输入 uid 片段搜索（必填后才展示匹配项）"
+        autocomplete="off"
+      />
       <button type="button" id="reload" class="btn-ghost">刷新</button>
     </div>
     <p id="status" class="status" aria-live="polite"></p>
@@ -26,15 +31,15 @@
       <section class="block">
         <h2>本机屏蔽 <span id="count-local" class="count">0</span></h2>
         <p class="sub">服务器名单已满时仅本浏览器生效</p>
+        <p id="hint-local" class="list-hint list-hint--idle"></p>
         <ul id="list-local" class="list"></ul>
-        <p id="empty-local" class="empty">暂无</p>
       </section>
 
       <section class="block">
         <h2>微博已拉黑 <span id="count-server" class="count">0</span></h2>
         <p class="sub">与微博「屏蔽设置 → 用户」同步；取消拉黑需已登录微博标签页</p>
+        <p id="hint-server" class="list-hint list-hint--idle"></p>
         <ul id="list-server" class="list"></ul>
-        <p id="empty-server" class="empty">暂无</p>
       </section>
     </div>
 

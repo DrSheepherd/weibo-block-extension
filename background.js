@@ -336,25 +336,42 @@ function storageGetLists() {
   });
 }
 
+function storageWriteLists(payload) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(payload, () => resolve());
+  });
+}
+
 function storageRemoveUid(uid, which) {
   const id = String(uid);
+  if (which === 'local') {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([STORAGE_KEY_LOCAL], (r) => {
+        const local = new Set((Array.isArray(r[STORAGE_KEY_LOCAL]) ? r[STORAGE_KEY_LOCAL] : []).map(String));
+        local.delete(id);
+        storageWriteLists({ [STORAGE_KEY_LOCAL]: Array.from(local) }).then(resolve);
+      });
+    });
+  }
+  if (which === 'server') {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([STORAGE_KEY], (r) => {
+        const server = new Set((Array.isArray(r[STORAGE_KEY]) ? r[STORAGE_KEY] : []).map(String));
+        server.delete(id);
+        storageWriteLists({ [STORAGE_KEY]: Array.from(server) }).then(resolve);
+      });
+    });
+  }
   return new Promise((resolve) => {
     chrome.storage.local.get([STORAGE_KEY, STORAGE_KEY_LOCAL], (r) => {
       const server = new Set((Array.isArray(r[STORAGE_KEY]) ? r[STORAGE_KEY] : []).map(String));
       const local = new Set((Array.isArray(r[STORAGE_KEY_LOCAL]) ? r[STORAGE_KEY_LOCAL] : []).map(String));
-      if (which === 'local' || which === 'both') {
-        local.delete(id);
-      }
-      if (which === 'server' || which === 'both') {
-        server.delete(id);
-      }
-      chrome.storage.local.set(
-        {
-          [STORAGE_KEY]: Array.from(server),
-          [STORAGE_KEY_LOCAL]: Array.from(local),
-        },
-        () => resolve(),
-      );
+      server.delete(id);
+      local.delete(id);
+      storageWriteLists({
+        [STORAGE_KEY]: Array.from(server),
+        [STORAGE_KEY_LOCAL]: Array.from(local),
+      }).then(resolve);
     });
   });
 }
@@ -368,13 +385,10 @@ function storagePromoteLocalToServer(uid) {
       const local = new Set((Array.isArray(r[STORAGE_KEY_LOCAL]) ? r[STORAGE_KEY_LOCAL] : []).map(String));
       local.delete(id);
       server.add(id);
-      chrome.storage.local.set(
-        {
-          [STORAGE_KEY]: Array.from(server),
-          [STORAGE_KEY_LOCAL]: Array.from(local),
-        },
-        () => resolve(),
-      );
+      storageWriteLists({
+        [STORAGE_KEY]: Array.from(server),
+        [STORAGE_KEY_LOCAL]: Array.from(local),
+      }).then(resolve);
     });
   });
 }
